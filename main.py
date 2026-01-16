@@ -4,10 +4,17 @@ import requests
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
+import asyncio
 
 # ================== SECRETS ==================
-DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
-ERLC_API_KEY = os.environ["ERLC_API_KEY"]
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+ERLC_API_KEY = os.getenv("ERLC_API_KEY")
+
+if not DISCORD_TOKEN:
+    raise ValueError("❌ DISCORD_TOKEN not found in Railway environment variables!")
+
+if not ERLC_API_KEY:
+    raise ValueError("❌ ERLC_API_KEY not found in Railway environment variables!")
 
 # ================== ER:LC API ==================
 ERLC_BASE_URL = "https://api.policeroleplay.community/v1"
@@ -112,7 +119,7 @@ class SessionView(discord.ui.View):
         embed = discord.Embed(
             title="<:image_20260115_172643193:1461471690092449905> Session has started!",
             description=(
-                "> Session has started you are free you join.\n"
+                "> Session has started you are free to join.\n"
                 "> Please ensure you follow all rules and have fun roleplaying!"
             ),
             color=0x2b2d31
@@ -151,9 +158,8 @@ class SessionView(discord.ui.View):
         embed = discord.Embed(
             title="Session Shutdown!",
             description=(
-                "> The Server Has now been shutdown, Please wait for for we\n"
-                "> host another session very soon aswell please don't be In-game\n"
-                "> while the session is down."
+                "> The Server Has now been shutdown, Please wait for another session.\n"
+                "> Please don't be In-game while the session is down."
             ),
             color=0x2b2d31
         )
@@ -190,19 +196,23 @@ async def session(interaction: discord.Interaction):
         await interaction.response.send_message("❌ You do not have permission to use this command.", ephemeral=True)
         return
 
-    await interaction.response.defer(ephemeral=True)
-    
-    data = get_server_data()
+    # ✅ Defer immediately to avoid Unknown interaction error
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    # Run blocking API call asynchronously
+    loop = asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, get_server_data)
+
     if not data:
         await interaction.followup.send("❌ Failed to fetch ER:LC data.", ephemeral=True)
         return
-        
-    embed = create_session_embed(data)
-    if isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
-        msg = await interaction.channel.send(embed=embed, view=SessionView())
-        active_session_messages[msg.id] = interaction.channel.id
-        await interaction.followup.send("✅ Session embed posted!", ephemeral=True)
 
+    embed = create_session_embed(data)
+    msg = await interaction.channel.send(embed=embed, view=SessionView())
+    active_session_messages[msg.id] = interaction.channel.id
+    await interaction.followup.send("✅ Session embed posted!", ephemeral=True)
+
+# Optional: other slash commands
 @bot.tree.command(name="command", description="Execute a command with input")
 @app_commands.describe(command="The command name", input="The input for the command")
 async def command(interaction: discord.Interaction, command: str, input: str):
